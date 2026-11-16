@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Availability Tracker</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #fff; --text: #1c1e21; --muted: #6b7280;
+    --line: #e2e5ea; --accent: #15803d; --accent-soft: #dcfce7; --danger: #b91c1c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111315; --card: #1b1e22; --text: #eceef0; --muted: #9aa1ab;
+      --line: #2c3036; --accent: #4ade80; --accent-soft: #143222; --danger: #f87171;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px 48px; background: var(--bg); color: var(--text);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 0 0 12px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  label { font-weight: 600; }
+  input[type=text], input[type=password], input[type=time] {
+    font: inherit; color: inherit; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  }
+  input[type=text], input[type=password] { width: 100%; }
+  #setpw .hint { margin: 0 0 14px; }
+  input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
+  #login input { margin: 8px 0 14px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; border-radius: 8px; padding: 10px 18px;
+    border: 1px solid var(--accent); background: var(--accent); color: var(--card);
+  }
+  button.link { background: none; border: none; color: var(--muted); padding: 0; font-weight: 400; text-decoration: underline; }
+  button.link.danger { color: var(--danger); }
+  button:disabled { opacity: .6; cursor: default; }
+  button.group {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%;
+    margin-bottom: 8px; text-align: left; background: var(--bg); color: var(--text); border-color: var(--line);
+  }
+  button.group:hover { border-color: var(--accent); }
+  button.group small { font-weight: 400; color: var(--muted); white-space: nowrap; }
+  button.group.joined small { color: var(--accent); }
+  .inline { display: flex; gap: 8px; margin-top: 8px; }
+  .empty { color: var(--muted); margin: 0 0 12px; }
+  .day { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 10px 0; border-top: 1px solid var(--line); min-height: 58px; }
+  .day:first-of-type { border-top: none; }
+  .check { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .day .check { width: 150px; }
+  .times { display: flex; align-items: center; gap: 8px; }
+  .na, .hint { color: var(--muted); }
+  .hint { font-weight: 400; font-size: .9rem; }
+  #privacy { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 6px; }
+  #privacy input[type=text] { margin-top: 10px; }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 12px 16px; flex-wrap: wrap; margin-top: 16px; }
+  .actions { display: flex; gap: 16px; flex-wrap: wrap; }
+  .error { color: var(--danger); margin: 10px 0 0; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { padding: 8px 10px; text-align: center; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; font-weight: 600; position: sticky; left: 0; background: var(--card); }
+  td.yes { background: var(--accent-soft); }
+  td.no { color: var(--muted); }
+  tr.me td:first-child::after { content: " (you)"; font-weight: 400; color: var(--muted); }
+  tfoot td { font-weight: 600; border-bottom: none; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Availability Tracker</h1>
+  <p class="sub">Tell your group which days you're free, and see who else is.</p>
+
+  <!-- Step 1: name -->
+  <form id="login" class="card">
+    <label for="name">What's your name?</label>
+    <input type="text" id="name" maxlength="40" autocomplete="username" required autofocus>
+    <!-- Only shown when the name typed above is password-protected -->
+    <div id="loginPw" hidden>
+      <label for="password">Password</label>
+      <input type="password" id="password" autocomplete="current-password">
+    </div>
+    <button type="submit">Continue</button>
+  </form>
+
+  <!-- Step 2: pick or create a group -->
+  <section id="groups" class="card" hidden>
+    <h2>Hi <span id="who"></span> — pick a group</h2>
+    <div id="groupList"></div>
+    <label for="groupName">Start a new group, or join a private one by name</label>
+    <form id="newGroup" class="inline">
+      <input type="text" id="groupName" maxlength="40" placeholder="Group name" required>
+      <button type="submit">Go</button>
+    </form>
+    <div class="row">
+      <button type="button" class="link" id="switch">Not you? Switch name</button>
+    </div>
+  </section>
+
+  <!-- Private group: passcode needed before joining -->
+  <form id="pass" class="card" hidden>
+    <h2><span id="passGroup"></span> is private</h2>
+    <label for="passCode">Passcode</label>
+    <div class="inline">
+      <input type="text" id="passCode" maxlength="40" autocomplete="off" required>
+      <button type="submit">Join</button>
+    </div>
+    <div class="row">
+      <button type="button" class="link back">← All groups</button>
+    </div>
+  </form>
+
+  <!-- Creating a group needs a password on the account -->
+  <form id="setpw" class="card" hidden>
+    <h2>Set a password to create groups</h2>
+    <p class="hint">Joining groups only needs a name, but creating one needs a password.
+      From now on you'll use it to sign in as <strong id="pwName"></strong>.</p>
+    <label for="newPw">Password (6+ characters)</label>
+    <div class="inline">
+      <input type="password" id="newPw" minlength="6" maxlength="200" autocomplete="new-password" required>
+      <button type="submit">Set password</button>
+    </div>
+    <div class="row">
+      <button type="button" class="link back">← All groups</button>
+    </div>
+  </form>
+
+  <!-- Step 3: availability within the group -->
+  <form id="form" class="card" hidden>
+    <h2><span class="groupTitle"></span>: when are you available?</h2>
+    <div id="days"></div>
+    <div id="privacy" hidden>
+      <label class="check">
+        <input type="checkbox" id="private">
+        <span>Make this group private <span class="hint">— hidden from the list, joined with a passcode</span></span>
+      </label>
+      <input type="text" id="newCode" maxlength="40" autocomplete="off" placeholder="Passcode to share with your group" hidden>
+    </div>
+    <div class="row">
+      <button type="button" class="link back">← All groups</button>
+      <button type="submit" id="save">Save</button>
+    </div>
+  </form>
+
+  <!-- Step 4: everyone in the group -->
+  <section id="results" class="card" hidden>
+    <div class="row" style="margin: 0 0 12px">
+      <h2 style="margin: 0"><span class="groupTitle"></span> <span class="hint" id="privateTag" hidden>(private)</span></h2>
+      <button type="button" class="link" id="edit">Edit mine</button>
+    </div>
+    <div class="scroll"><table id="table"></table></div>
+    <div class="row">
+      <button type="button" class="link back">← All groups</button>
+      <span class="actions">
+        <button type="button" class="link danger" id="leave">Leave group</button>
+        <button type="button" class="link danger" id="delete" hidden>Delete group</button>
+      </span>
+    </div>
+  </section>
+
+  <p class="error" id="error" hidden></p>
+</main>
+
+<script>
+const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const $ = id => document.getElementById(id);
+// code = passcode used to get into the current private group; isNew = group doesn't exist until we save.
+let me = '', group = '', code = '', isNew = false, groupNames = [];
+// token = session for a password-protected name; pendingGroup = group being created while we ask for a password.
+let token = '', hasPassword = false, pendingGroup = '';
+
+// Build one row per day: checkbox, and time range shown only when checked.
+$('days').innerHTML = DAYS.map(d => `
+  <div class="day" data-day="${d}">
+    <label class="check"><input type="checkbox"> ${d}</label>
+    <span class="na">Not available</span>
+    <span class="times" hidden>
+      <input type="time" class="from" value="18:00" aria-label="${d} from">
+      <span>to</span>
+      <input type="time" class="to" value="22:00" aria-label="${d} to">
+    </span>
+  </div>`).join('');
+
+function syncRow(row) {
+  const on = row.querySelector('input[type=checkbox]').checked;
+  row.querySelector('.times').hidden = !on;
+  row.querySelector('.na').hidden = on;
+}
+$('days').addEventListener('change', e => {
+  if (e.target.type === 'checkbox') syncRow(e.target.closest('.day'));
+});
+$('private').addEventListener('change', () => { $('newCode').hidden = !$('private').checked; });
+
+// Every call is a POST acting as the current name (+ session token if it has a password).
+// Errors carry the server's message plus needCode (private group) / needPassword (protected name).
+async function api(action, body) {
+  const r = await fetch('/api/availability', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, name: me, token, ...body }),
+  });
+  const data = await r.json().catch(() => ({ error: 'Server error ' + r.status }));
+  if (!r.ok) throw Object.assign(new Error(data.error || 'Something went wrong.'), data);
+  return data;
+}
+
+function show(id) {
+  for (const s of ['login', 'groups', 'pass', 'setpw', 'form', 'results']) $(s).hidden = s !== id;
+  $('error').hidden = true;
+}
+function fail(err) {
+  // The name turned out to be password-protected (or the session is gone): back to login, asking for it.
+  if (err.needPassword) {
+    show('login');
+    $('name').value = me;
+    $('loginPw').hidden = false;
+    $('password').value = '';
+    $('password').focus();
+  }
+  $('error').textContent = err.message;
+  $('error').hidden = false;
+}
+
+function setSession(data) {
+  me = data.name;
+  token = data.token || '';
+  hasPassword = data.hasPassword;
+  localStorage.setItem('name', me);
+  localStorage.setItem('token', token);
+  $('password').value = '';
+  $('loginPw').hidden = true;
+}
+// Wraps an async handler so any failure lands in the error line.
+const guard = fn => (...args) => fn(...args).catch(fail);
+
+// Case-insensitive match so "sam" edits "Sam" (and "poker" opens "Poker") instead of duplicating.
+const same = (a, b) => a.toLowerCase() === b.toLowerCase();
+
+async function showGroups() {
+  const all = await api('list');
+  groupNames = Object.keys(all).sort((a, b) => a.localeCompare(b));
+  const list = $('groupList');
+  list.textContent = '';
+  if (!groupNames.length) {
+    const p = document.createElement('p');
+    p.className = 'empty';
+    p.textContent = 'No groups yet — create the first one below.';
+    list.appendChild(p);
+  }
+  for (const g of groupNames) {
+    const { members, private: isPrivate } = all[g];
+    const joined = members.some(m => same(m, me));
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'group' + (joined ? ' joined' : '');
+    btn.appendChild(document.createElement('span')).textContent = g;
+    btn.appendChild(document.createElement('small')).textContent = (isPrivate ? 'Private · ' : '') +
+      members.length + (members.length === 1 ? ' person' : ' people') + (joined ? ' · joined' : '');
+    btn.addEventListener('click', guard(() => openGroup(g)));
+    list.appendChild(btn);
+  }
+  $('who').textContent = me;
+  $('groupName').value = '';
+  show('groups');
+}
+
+// Members go straight to the group's calendar; newcomers fill in the form first (which joins them).
+async function openGroup(g, passcode = '') {
+  let data;
+  try {
+    data = await api('open', { group: g, code: passcode });
+  } catch (err) {
+    if (!err.needCode) throw err;
+    // Private group we're not in yet: ask for the passcode (and say so if the one given was wrong).
+    $('passGroup').textContent = g;
+    $('passCode').value = '';
+    show('pass');
+    $('passCode').focus();
+    if (passcode) fail(err);
+    return;
+  }
+  // Brand-new group: only accounts with a password may create one, so ask for one first.
+  if (!data.exists && !hasPassword) {
+    pendingGroup = g;
+    $('pwName').textContent = me;
+    $('newPw').value = '';
+    show('setpw');
+    $('newPw').focus();
+    return;
+  }
+  group = data.group;
+  code = passcode;
+  isNew = !data.exists;
+  $('privacy').hidden = !isNew;
+  $('private').checked = false;
+  $('newCode').value = '';
+  $('newCode').hidden = true;
+  me = Object.keys(data.members).find(n => same(n, me)) || me;
+  for (const el of document.querySelectorAll('.groupTitle')) el.textContent = group;
+  fillForm(data.members[me]);
+  if (data.members[me]) showResults(data); else show('form');
+}
+
+function fillForm(saved) {
+  for (const row of document.querySelectorAll('.day')) {
+    const d = saved && saved[row.dataset.day];
+    row.querySelector('input[type=checkbox]').checked = !!d;
+    row.querySelector('.from').value = d ? d.from : '18:00';
+    row.querySelector('.to').value = d ? d.to : '22:00';
+    syncRow(row);
+  }
+}
+
+function fmt(t) {
+  let [h, m] = t.split(':').map(Number);
+  const ap = h < 12 ? 'am' : 'pm';
+  h = h % 12 || 12;
+  return h + (m ? ':' + String(m).padStart(2, '0') : '') + ap;
+}
+
+function showResults(data) {
+  const all = data.members;
+  const names = Object.keys(all).sort((a, b) => a.localeCompare(b));
+  const table = $('table');
+  table.textContent = '';
+
+  const head = table.createTHead().insertRow();
+  for (const h of ['', ...DAYS.map(d => d.slice(0, 3))]) {
+    const th = document.createElement('th'); th.textContent = h; head.appendChild(th);
+  }
+  const body = table.createTBody();
+  for (const n of names) {
+    const tr = body.insertRow();
+    if (n === me) tr.className = 'me';
+    tr.insertCell().textContent = n;
+    for (const d of DAYS) {
+      const v = all[n][d], td = tr.insertCell();
+      td.className = v ? 'yes' : 'no';
+      td.textContent = v ? `${fmt(v.from)}–${fmt(v.to)}` : '—';
+    }
+  }
+  const foot = table.createTFoot().insertRow();
+  foot.insertCell().textContent = 'Available';
+  for (const d of DAYS) {
+    foot.insertCell().textContent = names.filter(n => all[n][d]).length + '/' + names.length;
+  }
+
+  $('privateTag').hidden = !data.private;
+  $('delete').hidden = !same(data.creator, me);   // only the creator can delete the group
+  show('results');
+}
+
+// Destructive buttons need a second click within a few seconds instead of a popup.
+function confirmClick(btn, action) {
+  const label = btn.textContent;
+  let timer;
+  const reset = () => { clearTimeout(timer); delete btn.dataset.armed; btn.textContent = label; };
+  btn.addEventListener('click', guard(async () => {
+    if (btn.dataset.armed) { reset(); return action(); }
+    btn.dataset.armed = '1';
+    btn.textContent = 'Click again to confirm';
+    timer = setTimeout(reset, 4000);
+  }));
+}
+confirmClick($('leave'), async () => { await api('leave', { group }); await showGroups(); });
+confirmClick($('delete'), async () => { await api('delete', { group }); await showGroups(); });
+
+$('login').addEventListener('submit', guard(async e => {
+  e.preventDefault();
+  const name = $('name').value.trim();
+  if (!name) return;
+  me = name;
+  token = '';
+  // Names without a password get straight in; protected ones come back needPassword (see fail()).
+  setSession(await api('login', { password: $('loginPw').hidden ? '' : $('password').value }));
+  await showGroups();
+}));
+// Typing a different name starts over: the password box only applies to the name it was asked for.
+$('name').addEventListener('input', () => { $('loginPw').hidden = true; $('error').hidden = true; });
+
+$('setpw').addEventListener('submit', guard(async e => {
+  e.preventDefault();
+  setSession(await api('setPassword', { password: $('newPw').value }));
+  $('newPw').value = '';
+  await openGroup(pendingGroup);
+}));
+
+$('newGroup').addEventListener('submit', guard(async e => {
+  e.preventDefault();
+  const typed = $('groupName').value.trim();
+  // A new group is actually created when its first member saves their availability.
+  if (typed) await openGroup(typed);
+}));
+
+$('pass').addEventListener('submit', guard(async e => {
+  e.preventDefault();
+  const typed = $('passCode').value.trim();
+  if (typed) await openGroup($('passGroup').textContent, typed);
+}));
+
+$('form').addEventListener('submit', guard(async e => {
+  e.preventDefault();
+  $('error').hidden = true;
+  const days = {};
+  for (const row of document.querySelectorAll('.day')) {
+    if (!row.querySelector('input[type=checkbox]').checked) { days[row.dataset.day] = null; continue; }
+    const from = row.querySelector('.from').value, to = row.querySelector('.to').value;
+    if (!from || !to) throw new Error(`Pick a start and end time for ${row.dataset.day}.`);
+    days[row.dataset.day] = { from, to };
+  }
+  const makePrivate = isNew && $('private').checked;
+  const passcode = makePrivate ? $('newCode').value.trim() : code;
+  if (makePrivate && !passcode) throw new Error('Choose a passcode for your private group.');
+
+  $('save').disabled = true;
+  try {
+    const data = await api('save', { group, days, private: makePrivate, code: passcode });
+    isNew = false;
+    $('privacy').hidden = true;
+    showResults(data);
+  } finally { $('save').disabled = false; }
+}));
+
+$('edit').addEventListener('click', () => show('form'));
+for (const b of document.querySelectorAll('.back')) b.addEventListener('click', guard(showGroups));
+$('switch').addEventListener('click', () => {
+  localStorage.removeItem('name');
+  localStorage.removeItem('token');
+  me = token = '';
+  hasPassword = false;
+  $('name').value = '';
+  $('loginPw').hidden = true;
+  show('login');
+  $('name').focus();
+});
+
+// Returning visitor: skip the name step (a protected name needs its saved session to still be valid).
+me = localStorage.getItem('name') || '';
+token = localStorage.getItem('token') || '';
+if (me) {
+  $('name').value = me;
+  guard(async () => { setSession(await api('login')); await showGroups(); })();
+}
+</script>
+</body>
+</html>
