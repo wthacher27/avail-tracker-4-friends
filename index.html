@@ -70,6 +70,34 @@
   td.no { color: var(--muted); }
   tr.me td:first-child::after { content: " (you)"; font-weight: 400; color: var(--muted); }
   tfoot td { font-weight: 600; border-bottom: none; }
+  /* Comfortable tap targets everywhere */
+  button, input[type=text], input[type=password], input[type=time] { min-height: 44px; }
+  body { overflow-wrap: anywhere; }
+
+  /* Per-day list: the phone version of the calendar table */
+  #dayList { display: none; }
+  .dayCard { padding: 12px 0; border-top: 1px solid var(--line); }
+  .dayCard:first-child { border-top: none; padding-top: 0; }
+  .dayHead, .who { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .dayHead span { color: var(--muted); font-size: .9rem; white-space: nowrap; }
+  .who { margin-top: 6px; padding: 8px 10px; border-radius: 8px; background: var(--accent-soft); }
+  .who span:last-child { white-space: nowrap; }
+  .who small { color: var(--muted); }
+  .dayCard .na { margin: 6px 0 0; font-size: .9rem; }
+
+  @media (max-width: 600px) {
+    body { padding: 16px 12px 40px; }
+    .card { padding: 16px; }
+    h1 { font-size: 1.3rem; }
+    /* Seven columns don't fit a phone: swap the table for the per-day list */
+    .scroll { display: none; }
+    #dayList { display: block; }
+    /* Day name and status on one line, time pickers full-width underneath */
+    .day .check { width: auto; flex: 1; }
+    .times { width: 100%; }
+    .times input { flex: 1; min-width: 0; }
+    #save { flex: 1; }
+  }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -156,6 +184,7 @@
       <button type="button" class="link" id="edit">Edit mine</button>
     </div>
     <div class="scroll"><table id="table"></table></div>
+    <div id="dayList"></div>
     <div class="row">
       <button type="button" class="link back">← All groups</button>
       <span class="actions">
@@ -350,6 +379,32 @@ function showResults(data) {
   foot.insertCell().textContent = 'Available';
   for (const d of DAYS) {
     foot.insertCell().textContent = names.filter(n => all[n][d]).length + '/' + names.length;
+  }
+
+  // Same data as a per-day list (shown instead of the table on phones): who's free each day, and when.
+  const list = $('dayList');
+  list.textContent = '';
+  for (const d of DAYS) {
+    const free = names.filter(n => all[n][d]);
+    const card = list.appendChild(document.createElement('div'));
+    card.className = 'dayCard';
+    const dayHead = card.appendChild(document.createElement('div'));
+    dayHead.className = 'dayHead';
+    dayHead.appendChild(document.createElement('strong')).textContent = d;
+    dayHead.appendChild(document.createElement('span')).textContent = `${free.length}/${names.length} available`;
+    for (const n of free) {
+      const row = card.appendChild(document.createElement('div'));
+      row.className = 'who';
+      const who = row.appendChild(document.createElement('span'));
+      who.textContent = n;
+      if (n === me) who.appendChild(document.createElement('small')).textContent = ' (you)';
+      row.appendChild(document.createElement('span')).textContent = `${fmt(all[n][d].from)}–${fmt(all[n][d].to)}`;
+    }
+    if (!free.length) {
+      const none = card.appendChild(document.createElement('p'));
+      none.className = 'na';
+      none.textContent = 'Nobody available';
+    }
   }
 
   $('privateTag').hidden = !data.private;
