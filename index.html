@@ -31,7 +31,7 @@
     border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
   }
   input[type=text], input[type=password] { width: 100%; }
-  #setpw .hint { margin: 0 0 14px; }
+  #setpw .hint, #invite { margin: 0 0 14px; }
   input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
   #login input { margin: 8px 0 14px; }
   button {
@@ -53,7 +53,15 @@
   .day { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 10px 0; border-top: 1px solid var(--line); min-height: 58px; }
   .day:first-of-type { border-top: none; }
   .check { display: flex; align-items: center; gap: 10px; cursor: pointer; }
-  .day .check { width: 150px; }
+  .day .check { width: 190px; }
+  .date { color: var(--muted); font-weight: 400; }
+  /* Week switcher above the form and the calendar */
+  .weekNav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 12px; }
+  .weekNav .nav { background: var(--bg); color: var(--text); border-color: var(--line); padding: 0 16px; font-size: 1.3rem; line-height: 1; }
+  .weekNav .nav:hover { border-color: var(--accent); }
+  .weekNav .mid { display: flex; flex-direction: column; align-items: center; text-align: center; }
+  .weekNav .link { min-height: 28px; font-size: .85rem; }
+  th.today, .dayHead.today strong { color: var(--accent); }
   .times { display: flex; align-items: center; gap: 8px; }
   .na, .hint { color: var(--muted); }
   .hint { font-weight: 400; font-size: .9rem; }
@@ -94,6 +102,7 @@
     #dayList { display: block; }
     /* Day name and status on one line, time pickers full-width underneath */
     .day .check { width: auto; flex: 1; }
+    #copyPrev { display: block; }
     .times { width: 100%; }
     .times input { flex: 1; min-width: 0; }
     #save { flex: 1; }
@@ -108,6 +117,8 @@
 
   <!-- Step 1: name -->
   <form id="login" class="card">
+    <!-- Shown when arriving from a shared group link -->
+    <p class="hint" id="invite" hidden>You've been invited to <strong id="inviteGroup"></strong>. Enter your name to join.</p>
     <label for="name">What's your name?</label>
     <input type="text" id="name" maxlength="40" autocomplete="username" required autofocus>
     <!-- Only shown when the name typed above is password-protected -->
@@ -163,7 +174,13 @@
   <!-- Step 3: availability within the group -->
   <form id="form" class="card" hidden>
     <h2><span class="groupTitle"></span>: when are you available?</h2>
+    <div class="weekNav">
+      <button type="button" class="nav prevWeek" aria-label="Previous week">‹</button>
+      <div class="mid"><strong class="weekLabel"></strong><button type="button" class="link thisWeek">Back to this week</button></div>
+      <button type="button" class="nav nextWeek" aria-label="Next week">›</button>
+    </div>
     <div id="days"></div>
+    <button type="button" class="link" id="copyPrev" hidden>Copy my times from the week before</button>
     <div id="privacy" hidden>
       <label class="check">
         <input type="checkbox" id="private">
@@ -181,7 +198,15 @@
   <section id="results" class="card" hidden>
     <div class="row" style="margin: 0 0 12px">
       <h2 style="margin: 0"><span class="groupTitle"></span> <span class="hint" id="privateTag" hidden>(private)</span></h2>
-      <button type="button" class="link" id="edit">Edit mine</button>
+      <span class="actions">
+        <button type="button" class="link" id="share">Share link</button>
+        <button type="button" class="link" id="edit">Edit mine</button>
+      </span>
+    </div>
+    <div class="weekNav">
+      <button type="button" class="nav prevWeek" aria-label="Previous week">‹</button>
+      <div class="mid"><strong class="weekLabel"></strong><button type="button" class="link thisWeek">Back to this week</button></div>
+      <button type="button" class="nav nextWeek" aria-label="Next week">›</button>
     </div>
     <div class="scroll"><table id="table"></table></div>
     <div id="dayList"></div>
@@ -205,10 +230,17 @@ let me = '', group = '', code = '', isNew = false, groupNames = [];
 // token = session for a password-protected name; pendingGroup = group being created while we ask for a password.
 let token = '', hasPassword = false, pendingGroup = '';
 
+// Shared group links look like /?g=Group%20Name. linkGroup is the group to open once we know who you are.
+let linkGroup = (new URLSearchParams(location.search).get('g') || '').trim();
+const groupUrl = g => location.origin + location.pathname + '?g=' + encodeURIComponent(g);
+// Where to go after signing in: the linked group if there is one, otherwise the group list.
+const enter = () => linkGroup ? openGroup(linkGroup, '', true) : showGroups();
+if (linkGroup) { $('inviteGroup').textContent = linkGroup; $('invite').hidden = false; }
+
 // Build one row per day: checkbox, and time range shown only when checked.
 $('days').innerHTML = DAYS.map(d => `
   <div class="day" data-day="${d}">
-    <label class="check"><input type="checkbox"> ${d}</label>
+    <label class="check"><input type="checkbox"> <span>${d} <span class="date"></span></span></label>
     <span class="na">Not available</span>
     <span class="times" hidden>
       <input type="time" class="from" value="18:00" aria-label="${d} from">
@@ -297,22 +329,33 @@ async function showGroups() {
   }
   $('who').textContent = me;
   $('groupName').value = '';
+  linkGroup = '';
+  history.replaceState(null, '', location.pathname);   // no group open: drop ?g= from the address bar
   show('groups');
 }
 
 // Members go straight to the group's calendar; newcomers fill in the form first (which joins them).
-async function openGroup(g, passcode = '') {
+async function openGroup(g, passcode = '', fromLink = false) {
   let data;
   try {
     data = await api('open', { group: g, code: passcode });
   } catch (err) {
     if (!err.needCode) throw err;
+    linkGroup = '';
     // Private group we're not in yet: ask for the passcode (and say so if the one given was wrong).
     $('passGroup').textContent = g;
     $('passCode').value = '';
     show('pass');
     $('passCode').focus();
     if (passcode) fail(err);
+    return;
+  }
+  linkGroup = '';
+  $('invite').hidden = true;
+  // A shared link to a group that's gone shouldn't turn into "create this group".
+  if (!data.exists && fromLink) {
+    await showGroups();
+    fail(new Error(`The group "${g}" no longer exists.`));
     return;
   }
   // Brand-new group: only accounts with a password may create one, so ask for one first.
@@ -332,19 +375,29 @@ async function openGroup(g, passcode = '') {
   $('newCode').value = '';
   $('newCode').hidden = true;
   me = Object.keys(data.members).find(n => same(n, me)) || me;
+  // Keep the address bar pointing at this group so it can be copied or reloaded (not for unsaved new groups).
+  if (data.exists) history.replaceState(null, '', groupUrl(group));
   for (const el of document.querySelectorAll('.groupTitle')) el.textContent = group;
-  fillForm(data.members[me]);
-  if (data.members[me]) showResults(data); else show('form');
+  weekStart = mondayOf(new Date());   // every group opens on the current week
+  if (data.members[me]) showResults(data);
+  else { current = data; renderWeek(); show('form'); }
 }
 
-function fillForm(saved) {
-  for (const row of document.querySelectorAll('.day')) {
-    const d = saved && saved[row.dataset.day];
-    row.querySelector('input[type=checkbox]').checked = !!d;
-    row.querySelector('.from').value = d ? d.from : '18:00';
-    row.querySelector('.to').value = d ? d.to : '22:00';
-    syncRow(row);
-  }
+// --- Calendar: availability is stored per date ("2026-11-16"), shown one Monday–Sunday week at a time ---
+const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+const mondayOf = d => addDays(d, -((d.getDay() + 6) % 7));
+// Local-time date key (toISOString would shift the day for anyone not on UTC).
+const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const shortDate = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+// weekStart = Monday of the week on screen; current = the open group's data as last returned by the server.
+let weekStart = mondayOf(new Date()), current = { members: {} };
+
+// Sets one form row from a saved {from,to} (or clears it).
+function setRow(row, d) {
+  row.querySelector('input[type=checkbox]').checked = !!d;
+  row.querySelector('.from').value = d ? d.from : '18:00';
+  row.querySelector('.to').value = d ? d.to : '22:00';
+  syncRow(row);
 }
 
 function fmt(t) {
@@ -354,22 +407,40 @@ function fmt(t) {
   return h + (m ? ':' + String(m).padStart(2, '0') : '') + ap;
 }
 
-function showResults(data) {
-  const all = data.members;
+// Redraws everything that depends on the week on screen: labels, my form rows, the table and the phone list.
+function renderWeek() {
+  const all = current.members, mine = all[me];
+  const dates = DAYS.map((_, i) => addDays(weekStart, i));
+  const keys = dates.map(iso), today = iso(new Date());
   const names = Object.keys(all).sort((a, b) => a.localeCompare(b));
+
+  const label = `${shortDate(dates[0])} – ${shortDate(dates[6])}, ${dates[6].getFullYear()}`;
+  for (const el of document.querySelectorAll('.weekLabel')) el.textContent = label;
+  for (const el of document.querySelectorAll('.thisWeek')) el.hidden = keys[0] === iso(mondayOf(new Date()));
+
+  // My form for this week (switching weeks discards unsaved changes to the previous one).
+  document.querySelectorAll('.day').forEach((row, i) => {
+    row.dataset.date = keys[i];
+    row.querySelector('.date').textContent = shortDate(dates[i]);
+    setRow(row, mine && mine[keys[i]]);
+  });
+  $('copyPrev').hidden = !mine || !keys.some((_, i) => mine[iso(addDays(weekStart, i - 7))]);
+
   const table = $('table');
   table.textContent = '';
-
   const head = table.createTHead().insertRow();
-  for (const h of ['', ...DAYS.map(d => d.slice(0, 3))]) {
-    const th = document.createElement('th'); th.textContent = h; head.appendChild(th);
-  }
+  head.appendChild(document.createElement('th'));
+  dates.forEach((date, i) => {
+    const th = head.appendChild(document.createElement('th'));
+    th.textContent = `${DAYS[i].slice(0, 3)} ${date.getDate()}`;
+    if (keys[i] === today) th.className = 'today';
+  });
   const body = table.createTBody();
   for (const n of names) {
     const tr = body.insertRow();
     if (n === me) tr.className = 'me';
     tr.insertCell().textContent = n;
-    for (const d of DAYS) {
+    for (const d of keys) {
       const v = all[n][d], td = tr.insertCell();
       td.className = v ? 'yes' : 'no';
       td.textContent = v ? `${fmt(v.from)}–${fmt(v.to)}` : '—';
@@ -377,20 +448,20 @@ function showResults(data) {
   }
   const foot = table.createTFoot().insertRow();
   foot.insertCell().textContent = 'Available';
-  for (const d of DAYS) {
+  for (const d of keys) {
     foot.insertCell().textContent = names.filter(n => all[n][d]).length + '/' + names.length;
   }
 
   // Same data as a per-day list (shown instead of the table on phones): who's free each day, and when.
   const list = $('dayList');
   list.textContent = '';
-  for (const d of DAYS) {
+  keys.forEach((d, i) => {
     const free = names.filter(n => all[n][d]);
     const card = list.appendChild(document.createElement('div'));
     card.className = 'dayCard';
     const dayHead = card.appendChild(document.createElement('div'));
-    dayHead.className = 'dayHead';
-    dayHead.appendChild(document.createElement('strong')).textContent = d;
+    dayHead.className = 'dayHead' + (d === today ? ' today' : '');
+    dayHead.appendChild(document.createElement('strong')).textContent = `${DAYS[i]}, ${shortDate(dates[i])}`;
     dayHead.appendChild(document.createElement('span')).textContent = `${free.length}/${names.length} available`;
     for (const n of free) {
       const row = card.appendChild(document.createElement('div'));
@@ -405,8 +476,14 @@ function showResults(data) {
       none.className = 'na';
       none.textContent = 'Nobody available';
     }
-  }
+  });
+}
 
+function showResults(data) {
+  current = data;
+  renderWeek();
+  history.replaceState(null, '', groupUrl(group));
+  $('share').dataset.private = data.private ? '1' : '';
   $('privateTag').hidden = !data.private;
   $('delete').hidden = !same(data.creator, me);   // only the creator can delete the group
   show('results');
@@ -435,7 +512,7 @@ $('login').addEventListener('submit', guard(async e => {
   token = '';
   // Names without a password get straight in; protected ones come back needPassword (see fail()).
   setSession(await api('login', { password: $('loginPw').hidden ? '' : $('password').value }));
-  await showGroups();
+  await enter();
 }));
 // Typing a different name starts over: the password box only applies to the name it was asked for.
 $('name').addEventListener('input', () => { $('loginPw').hidden = true; $('error').hidden = true; });
@@ -465,10 +542,11 @@ $('form').addEventListener('submit', guard(async e => {
   $('error').hidden = true;
   const days = {};
   for (const row of document.querySelectorAll('.day')) {
-    if (!row.querySelector('input[type=checkbox]').checked) { days[row.dataset.day] = null; continue; }
+    // Keyed by date; null clears that date. Only the week on screen is sent, other weeks stay as saved.
+    if (!row.querySelector('input[type=checkbox]').checked) { days[row.dataset.date] = null; continue; }
     const from = row.querySelector('.from').value, to = row.querySelector('.to').value;
     if (!from || !to) throw new Error(`Pick a start and end time for ${row.dataset.day}.`);
-    days[row.dataset.day] = { from, to };
+    days[row.dataset.date] = { from, to };
   }
   const makePrivate = isNew && $('private').checked;
   const passcode = makePrivate ? $('newCode').value.trim() : code;
@@ -483,7 +561,36 @@ $('form').addEventListener('submit', guard(async e => {
   } finally { $('save').disabled = false; }
 }));
 
-$('edit').addEventListener('click', () => show('form'));
+$('edit').addEventListener('click', () => { renderWeek(); show('form'); });
+
+// Week switcher (one in the form, one above the calendar).
+const goWeek = start => { weekStart = start; $('error').hidden = true; renderWeek(); };
+for (const b of document.querySelectorAll('.prevWeek')) b.addEventListener('click', () => goWeek(addDays(weekStart, -7)));
+for (const b of document.querySelectorAll('.nextWeek')) b.addEventListener('click', () => goWeek(addDays(weekStart, 7)));
+for (const b of document.querySelectorAll('.thisWeek')) b.addEventListener('click', () => goWeek(mondayOf(new Date())));
+
+// Fill this week's form with whatever I saved for the same weekdays one week earlier (not saved until Save).
+$('copyPrev').addEventListener('click', () => {
+  const mine = current.members[me] || {};
+  document.querySelectorAll('.day').forEach((row, i) => setRow(row, mine[iso(addDays(weekStart, i - 7))]));
+});
+
+// Share: the phone's share sheet where there is one, otherwise copy to the clipboard.
+// The link never contains a private group's passcode; that has to be passed on separately.
+$('share').addEventListener('click', guard(async () => {
+  const btn = $('share'), url = groupUrl(group);
+  const flash = text => { btn.textContent = text; setTimeout(() => { btn.textContent = 'Share link'; }, 2500); };
+  if (navigator.share) {
+    try { await navigator.share({ title: group + ' availability', url }); } catch { /* share sheet dismissed */ }
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    flash(btn.dataset.private ? 'Copied — share the passcode too' : 'Link copied');
+  } catch {
+    throw new Error('Could not copy automatically. Copy the link from the address bar instead.');
+  }
+}));
 for (const b of document.querySelectorAll('.back')) b.addEventListener('click', guard(showGroups));
 $('switch').addEventListener('click', () => {
   localStorage.removeItem('name');
@@ -501,7 +608,7 @@ me = localStorage.getItem('name') || '';
 token = localStorage.getItem('token') || '';
 if (me) {
   $('name').value = me;
-  guard(async () => { setSession(await api('login')); await showGroups(); })();
+  guard(async () => { setSession(await api('login')); await enter(); })();
 }
 </script>
 </body>

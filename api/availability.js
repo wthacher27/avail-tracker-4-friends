@@ -3,7 +3,8 @@
 //   setPassword  { password }                  -> { name, hasPassword: true, token }   (only if the name has none yet)
 //   list         {}                            -> groups you can see: { group: { members: [..], private, creator } }
 //   open         { group, code? }              -> { exists, group, private, creator, members: { name: days } }
-//   save         { group, days, private?, code? } -> saves (creating the group if new), returns the group
+//   save         { group, days, private?, code? } -> merges days ({ "YYYY-MM-DD": {from,to} | null }) into your
+//                                                 record (creating the group if new), returns the group
 //   leave        { group }                     -> removes you from the group (an emptied group is deleted)
 //   delete       { group }                     -> deletes the group, only if you created it
 //
@@ -15,15 +16,15 @@
 //   hash "users":         lowercased name -> { name, salt, pw (scrypt) }   (password accounts only)
 //   hash "sessions":      token -> lowercased name
 //   hash "groupmeta":     group -> { creator, private, code (sha256 of passcode) }
-//   hash "group:<name>":  member -> { Monday: {from,to} | null, ... }
+//   hash "group:<name>":  member -> { "2026-11-16": {from,to}, ... }   (only dates they're available)
 // Private groups are hidden from non-members and need the passcode to join.
 
 const crypto = require('crypto');
 
 const URL_ = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const TIME = /^\d{2}:\d{2}$/;
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const META = 'groupmeta', USERS = 'users', SESSIONS = 'sessions';
 const MIN_PASSWORD = 6;
 
@@ -135,7 +136,8 @@ async function handle(req) {
     return { exists: true, group, private: info.private, creator: info.creator, members };
   }
 
-  const [memberNames] = await redis(['HKEYS', key(group)]);
+  const existing = parseHash((await redis(['HGETALL', key(group)]))[0]);
+  const memberNames = Object.keys(existing);
   const member = memberNames.find(m => same(m, name));
 
   if (action === 'leave') {
@@ -155,11 +157,18 @@ async function handle(req) {
 
   if (action !== 'save') throw new HttpError(400, 'Unknown action.');
 
-  const days = {};
-  for (const day of DAYS) {
-    const d = input.days && input.days[day];
-    days[day] = d && TIME.test(d.from) && TIME.test(d.to) ? { from: d.from, to: d.to } : null;
+  // Availability is per calendar date. A save carries one week's dates and is merged into what's
+  // already stored, so other weeks are untouched; a null/invalid entry clears that date.
+  const days = { ...(member ? existing[member] : {}) };
+  for (const [date, d] of Object.entries(input.days || {}).slice(0, 31)) {
+    if (!DATE.test(date)) continue;
+    if (d && TIME.test(d.from) && TIME.test(d.to)) days[date] = { from: d.from, to: d.to };
+    else delete days[date];
   }
+  // Drop dates more than five weeks old so records don't grow forever.
+  const cutoff = new Date(Date.now() - 35 * 864e5).toISOString().slice(0, 10);
+  for (const date of Object.keys(days)) if (!DATE.test(date) || date < cutoff) delete days[date];
+
   const commands = [['HSET', key(group), member || name, JSON.stringify(days)]];
   let created = info;
   if (!info) {
