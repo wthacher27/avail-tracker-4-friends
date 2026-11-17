@@ -4,222 +4,248 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Availability Tracker</title>
-<style>
+<!-- ponytail: Tailwind's in-browser build + shadcn/ui's theme tokens and class recipes on plain HTML.
+     Real shadcn components need React and a build step; migrate if this page outgrows one file. -->
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.1.13"></script>
+<style type="text/tailwindcss">
+  /* shadcn/ui "neutral" theme, plus ok/ok-soft for "available" */
   :root {
-    --bg: #f4f5f7; --card: #fff; --text: #1c1e21; --muted: #6b7280;
-    --line: #e2e5ea; --accent: #15803d; --accent-soft: #dcfce7; --danger: #b91c1c;
+    --background: oklch(1 0 0); --foreground: oklch(0.145 0 0); --card: oklch(1 0 0);
+    --primary: oklch(0.205 0 0); --primary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.97 0 0); --muted-foreground: oklch(0.556 0 0); --accent: oklch(0.97 0 0);
+    --destructive: oklch(0.577 0.245 27.325); --border: oklch(0.922 0 0); --input: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0); --ok: oklch(0.527 0.154 150); --ok-soft: oklch(0.962 0.044 156.7);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #111315; --card: #1b1e22; --text: #eceef0; --muted: #9aa1ab;
-      --line: #2c3036; --accent: #4ade80; --accent-soft: #143222; --danger: #f87171;
+      --background: oklch(0.145 0 0); --foreground: oklch(0.985 0 0); --card: oklch(0.205 0 0);
+      --primary: oklch(0.922 0 0); --primary-foreground: oklch(0.205 0 0);
+      --muted: oklch(0.269 0 0); --muted-foreground: oklch(0.708 0 0); --accent: oklch(0.269 0 0);
+      --destructive: oklch(0.704 0.191 22.216); --border: oklch(1 0 0 / 10%); --input: oklch(1 0 0 / 15%);
+      --ring: oklch(0.556 0 0); --ok: oklch(0.792 0.209 151.7); --ok-soft: oklch(0.32 0.08 152.5);
     }
   }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 24px 16px 48px; background: var(--bg); color: var(--text);
-    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  @theme inline {
+    --color-background: var(--background); --color-foreground: var(--foreground); --color-card: var(--card);
+    --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground);
+    --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground); --color-accent: var(--accent);
+    --color-destructive: var(--destructive); --color-border: var(--border); --color-input: var(--input);
+    --color-ring: var(--ring); --color-ok: var(--ok); --color-ok-soft: var(--ok-soft);
   }
-  main { max-width: 760px; margin: 0 auto; }
-  h1 { font-size: 1.5rem; margin: 0 0 4px; }
-  h2 { font-size: 1.1rem; margin: 0 0 12px; }
-  .sub { color: var(--muted); margin: 0 0 20px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
-  label { font-weight: 600; }
-  input[type=text], input[type=password], input[type=time] {
-    font: inherit; color: inherit; background: var(--bg);
-    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  @layer base {
+    * { @apply border-border; }
+    body { @apply bg-background text-foreground antialiased; overflow-wrap: anywhere; }
+    h2 { @apply text-lg font-semibold tracking-tight; }
+    input[type=checkbox] { @apply size-5 flex-none; accent-color: var(--primary); }
   }
-  input[type=text], input[type=password] { width: 100%; }
-  #setpw .hint, #invite { margin: 0 0 14px; }
-  input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
-  #login input { margin: 8px 0 14px; }
-  button {
-    font: inherit; font-weight: 600; cursor: pointer; border-radius: 8px; padding: 10px 18px;
-    border: 1px solid var(--accent); background: var(--accent); color: var(--card);
-  }
-  button.link { background: none; border: none; color: var(--muted); padding: 0; font-weight: 400; text-decoration: underline; }
-  button.link.danger { color: var(--danger); }
-  button:disabled { opacity: .6; cursor: default; }
-  button.group {
-    display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%;
-    margin-bottom: 8px; text-align: left; background: var(--bg); color: var(--text); border-color: var(--line);
-  }
-  button.group:hover { border-color: var(--accent); }
-  button.group small { font-weight: 400; color: var(--muted); white-space: nowrap; }
-  button.group.joined small { color: var(--accent); }
-  .inline { display: flex; gap: 8px; margin-top: 8px; }
-  .empty { color: var(--muted); margin: 0 0 12px; }
-  .day { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 10px 0; border-top: 1px solid var(--line); min-height: 58px; }
-  .day:first-of-type { border-top: none; }
-  .check { display: flex; align-items: center; gap: 10px; cursor: pointer; }
-  .day .check { width: 190px; }
-  .date { color: var(--muted); font-weight: 400; }
-  /* Week switcher above the form and the calendar */
-  .weekNav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 12px; }
-  .weekNav .nav { background: var(--bg); color: var(--text); border-color: var(--line); padding: 0 16px; font-size: 1.3rem; line-height: 1; }
-  .weekNav .nav:hover { border-color: var(--accent); }
-  .weekNav .mid { display: flex; flex-direction: column; align-items: center; text-align: center; }
-  .weekNav .link { min-height: 28px; font-size: .85rem; }
-  th.today, .dayHead.today strong { color: var(--accent); }
-  .times { display: flex; align-items: center; gap: 8px; }
-  .na, .hint { color: var(--muted); }
-  .hint { font-weight: 400; font-size: .9rem; }
-  #privacy { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 6px; }
-  #privacy input[type=text] { margin-top: 10px; }
-  .row { display: flex; justify-content: space-between; align-items: center; gap: 12px 16px; flex-wrap: wrap; margin-top: 16px; }
-  .actions { display: flex; gap: 16px; flex-wrap: wrap; }
-  .error { color: var(--danger); margin: 10px 0 0; }
-  .scroll { overflow-x: auto; }
-  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
-  th, td { padding: 8px 10px; text-align: center; border-bottom: 1px solid var(--line); white-space: nowrap; }
-  th:first-child, td:first-child { text-align: left; font-weight: 600; position: sticky; left: 0; background: var(--card); }
-  td.yes { background: var(--accent-soft); }
-  td.no { color: var(--muted); }
-  tr.me td:first-child::after { content: " (you)"; font-weight: 400; color: var(--muted); }
-  tfoot td { font-weight: 600; border-bottom: none; }
-  /* Comfortable tap targets everywhere */
-  button, input[type=text], input[type=password], input[type=time] { min-height: 44px; }
-  body { overflow-wrap: anywhere; }
+  @layer components {
+    .card { @apply mb-4 flex flex-col gap-4 rounded-xl border bg-card p-5 shadow-sm sm:p-6; }
+    .label { @apply text-sm font-medium; }
+    .hint { @apply text-sm font-normal text-muted-foreground; }
+    .input {
+      @apply h-11 w-full min-w-0 rounded-md border border-input bg-transparent px-3 text-base shadow-xs outline-none
+        transition-shadow focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30;
+    }
+    .btn {
+      @apply inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-medium
+        whitespace-nowrap text-primary-foreground shadow-xs outline-none transition-colors hover:bg-primary/90
+        focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50;
+    }
+    .btn-outline { @apply border bg-background text-foreground hover:bg-accent dark:bg-input/30; }
+    .btn-ghost { @apply bg-transparent text-muted-foreground shadow-none hover:bg-accent hover:text-foreground; }
+    .btn-danger { @apply text-destructive hover:bg-destructive/10 hover:text-destructive; }
+    .btn-sm { @apply h-9 px-3; }
 
-  /* Per-day list: the phone version of the calendar table */
-  #dayList { display: none; }
-  .dayCard { padding: 12px 0; border-top: 1px solid var(--line); }
-  .dayCard:first-child { border-top: none; padding-top: 0; }
-  .dayHead, .who { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
-  .dayHead span { color: var(--muted); font-size: .9rem; white-space: nowrap; }
-  .who { margin-top: 6px; padding: 8px 10px; border-radius: 8px; background: var(--accent-soft); }
-  .who span:last-child { white-space: nowrap; }
-  .who small { color: var(--muted); }
-  .dayCard .na { margin: 6px 0 0; font-size: .9rem; }
+    /* Group list */
+    .group-item { @apply mb-2 h-auto min-h-12 w-full justify-between py-2 text-left whitespace-normal; }
+    .group-item small { @apply text-xs font-normal whitespace-nowrap text-muted-foreground; }
+    .group-item.joined small { @apply text-ok; }
 
-  @media (max-width: 600px) {
-    body { padding: 16px 12px 40px; }
-    .card { padding: 16px; }
-    h1 { font-size: 1.3rem; }
-    /* Seven columns don't fit a phone: swap the table for the per-day list */
-    .scroll { display: none; }
-    #dayList { display: block; }
-    /* Day name and status on one line, time pickers full-width underneath */
-    .day .check { width: auto; flex: 1; }
-    #copyPrev { display: block; }
-    .times { width: 100%; }
-    .times input { flex: 1; min-width: 0; }
-    #save { flex: 1; }
+    /* One button per day in the "set hours" form; opens the dialog */
+    .day {
+      @apply flex h-14 w-full cursor-pointer items-center justify-between gap-3 rounded-lg border px-4 text-left outline-none
+        transition-colors hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50;
+    }
+    .day .status { @apply text-sm whitespace-nowrap text-muted-foreground; }
+    .day.on { @apply border-ok/40 bg-ok-soft; }
+    .day.on .status { @apply font-medium text-ok; }
+
+    /* Calendar table (desktop) */
+    #table { @apply w-full text-sm; }
+    #table th, #table td { @apply border-b px-2 py-2.5 text-center whitespace-nowrap; }
+    #table th { @apply font-medium text-muted-foreground; }
+    #table th:first-child, #table td:first-child { @apply sticky left-0 bg-card text-left font-medium; }
+    #table td.yes { @apply bg-ok-soft font-medium text-ok; }
+    #table td.no { @apply text-muted-foreground; }
+    #table tr.me td:first-child::after { content: " (you)"; @apply font-normal text-muted-foreground; }
+    #table tfoot td { @apply border-b-0 font-medium; }
+    #table th.today, .dayHead.today strong { @apply text-ok; }
+
+    /* Per-day list (phones) */
+    .dayCard { @apply border-t py-3 first:border-t-0 first:pt-0; }
+    .dayHead, .who { @apply flex items-baseline justify-between gap-3; }
+    .dayHead span { @apply text-sm whitespace-nowrap text-muted-foreground; }
+    .who { @apply mt-1.5 rounded-md bg-ok-soft px-3 py-2 text-sm; }
+    .who span:last-child { @apply whitespace-nowrap; }
+    .who small, .dayCard .na { @apply text-muted-foreground; }
+    .dayCard .na { @apply mt-1.5 text-sm; }
+
+    dialog { opacity: 0; transform: scale(.96); transition: opacity .15s, transform .15s; }
+    dialog[open] { opacity: 1; transform: none; }
+    @starting-style { dialog[open] { opacity: 0; transform: scale(.96); } }
   }
-  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
-<main>
-  <h1>Availability Tracker</h1>
-  <p class="sub">Tell your group which days you're free, and see who else is.</p>
+<main class="mx-auto max-w-3xl px-4 py-8 sm:py-12">
+  <h1 class="text-2xl font-semibold tracking-tight">Availability Tracker</h1>
+  <p class="hint mt-1 mb-6">Tell your group which days you're free, and see who else is.</p>
 
   <!-- Step 1: name -->
   <form id="login" class="card">
     <!-- Shown when arriving from a shared group link -->
-    <p class="hint" id="invite" hidden>You've been invited to <strong id="inviteGroup"></strong>. Enter your name to join.</p>
-    <label for="name">What's your name?</label>
-    <input type="text" id="name" maxlength="40" autocomplete="username" required autofocus>
-    <!-- Only shown when the name typed above is password-protected -->
-    <div id="loginPw" hidden>
-      <label for="password">Password</label>
-      <input type="password" id="password" autocomplete="current-password">
+    <p class="hint" id="invite" hidden>You've been invited to <strong class="text-foreground" id="inviteGroup"></strong>. Enter your name to join.</p>
+    <div class="flex flex-col gap-2">
+      <label class="label" for="name">What's your name?</label>
+      <input class="input" type="text" id="name" maxlength="40" autocomplete="username" required autofocus>
     </div>
-    <button type="submit">Continue</button>
+    <!-- Only shown when the name typed above is password-protected -->
+    <div id="loginPw" class="flex flex-col gap-2" hidden>
+      <label class="label" for="password">Password</label>
+      <input class="input" type="password" id="password" autocomplete="current-password">
+    </div>
+    <button type="submit" class="btn sm:self-start">Continue</button>
   </form>
 
   <!-- Step 2: pick or create a group -->
   <section id="groups" class="card" hidden>
     <h2>Hi <span id="who"></span> — pick a group</h2>
     <div id="groupList"></div>
-    <label for="groupName">Start a new group, or join a private one by name</label>
-    <form id="newGroup" class="inline">
-      <input type="text" id="groupName" maxlength="40" placeholder="Group name" required>
-      <button type="submit">Go</button>
-    </form>
-    <div class="row">
-      <button type="button" class="link" id="switch">Not you? Switch name</button>
+    <div class="flex flex-col gap-2">
+      <label class="label" for="groupName">Start a new group, or join a private one by name</label>
+      <form id="newGroup" class="flex gap-2">
+        <input class="input" type="text" id="groupName" maxlength="40" placeholder="Group name" required>
+        <button type="submit" class="btn">Go</button>
+      </form>
     </div>
+    <button type="button" class="btn btn-ghost btn-sm -ml-3 self-start" id="switch">Not you? Switch name</button>
   </section>
 
   <!-- Private group: passcode needed before joining -->
   <form id="pass" class="card" hidden>
     <h2><span id="passGroup"></span> is private</h2>
-    <label for="passCode">Passcode</label>
-    <div class="inline">
-      <input type="text" id="passCode" maxlength="40" autocomplete="off" required>
-      <button type="submit">Join</button>
+    <div class="flex flex-col gap-2">
+      <label class="label" for="passCode">Passcode</label>
+      <div class="flex gap-2">
+        <input class="input" type="text" id="passCode" maxlength="40" autocomplete="off" required>
+        <button type="submit" class="btn">Join</button>
+      </div>
     </div>
-    <div class="row">
-      <button type="button" class="link back">← All groups</button>
-    </div>
+    <button type="button" class="btn btn-ghost btn-sm back -ml-3 self-start">← All groups</button>
   </form>
 
   <!-- Creating a group needs a password on the account -->
   <form id="setpw" class="card" hidden>
     <h2>Set a password to create groups</h2>
     <p class="hint">Joining groups only needs a name, but creating one needs a password.
-      From now on you'll use it to sign in as <strong id="pwName"></strong>.</p>
-    <label for="newPw">Password (6+ characters)</label>
-    <div class="inline">
-      <input type="password" id="newPw" minlength="6" maxlength="200" autocomplete="new-password" required>
-      <button type="submit">Set password</button>
+      From now on you'll use it to sign in as <strong class="text-foreground" id="pwName"></strong>.</p>
+    <div class="flex flex-col gap-2">
+      <label class="label" for="newPw">Password (6+ characters)</label>
+      <div class="flex gap-2">
+        <input class="input" type="password" id="newPw" minlength="6" maxlength="200" autocomplete="new-password" required>
+        <button type="submit" class="btn">Set password</button>
+      </div>
     </div>
-    <div class="row">
-      <button type="button" class="link back">← All groups</button>
-    </div>
+    <button type="button" class="btn btn-ghost btn-sm back -ml-3 self-start">← All groups</button>
   </form>
 
   <!-- Step 3: availability within the group -->
   <form id="form" class="card" hidden>
-    <h2><span class="groupTitle"></span>: when are you available?</h2>
-    <div class="weekNav">
-      <button type="button" class="nav prevWeek" aria-label="Previous week">‹</button>
-      <div class="mid"><strong class="weekLabel"></strong><button type="button" class="link thisWeek">Back to this week</button></div>
-      <button type="button" class="nav nextWeek" aria-label="Next week">›</button>
+    <div>
+      <h2><span class="groupTitle"></span>: when are you available?</h2>
+      <p class="hint mt-1">Tap a day to set your hours.</p>
     </div>
-    <div id="days"></div>
-    <button type="button" class="link" id="copyPrev" hidden>Copy my times from the week before</button>
-    <div id="privacy" hidden>
-      <label class="check">
+    <div class="weekNav flex items-center justify-between gap-2">
+      <button type="button" class="btn btn-outline prevWeek w-11 px-0 text-lg" aria-label="Previous week">‹</button>
+      <div class="flex flex-col items-center text-center">
+        <strong class="weekLabel text-sm font-medium"></strong>
+        <button type="button" class="thisWeek cursor-pointer text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground">Back to this week</button>
+      </div>
+      <button type="button" class="btn btn-outline nextWeek w-11 px-0 text-lg" aria-label="Next week">›</button>
+    </div>
+    <div id="days" class="flex flex-col gap-2"></div>
+    <button type="button" class="btn btn-ghost btn-sm -ml-3 self-start" id="copyPrev" hidden>Copy my times from the week before</button>
+    <div id="privacy" class="flex flex-col gap-3 border-t pt-4" hidden>
+      <label class="flex cursor-pointer items-center gap-3 text-sm font-medium">
         <input type="checkbox" id="private">
         <span>Make this group private <span class="hint">— hidden from the list, joined with a passcode</span></span>
       </label>
-      <input type="text" id="newCode" maxlength="40" autocomplete="off" placeholder="Passcode to share with your group" hidden>
+      <input class="input" type="text" id="newCode" maxlength="40" autocomplete="off" placeholder="Passcode to share with your group" hidden>
     </div>
-    <div class="row">
-      <button type="button" class="link back">← All groups</button>
-      <button type="submit" id="save">Save</button>
+    <div class="flex items-center justify-between gap-3">
+      <!-- "← Back" to the calendar when editing, "← All groups" when joining (label set in renderWeek) -->
+      <button type="button" class="btn btn-ghost btn-sm -ml-3" id="formBack"></button>
+      <button type="submit" class="btn flex-1 sm:flex-none" id="save">Save</button>
     </div>
   </form>
 
   <!-- Step 4: everyone in the group -->
   <section id="results" class="card" hidden>
-    <div class="row" style="margin: 0 0 12px">
-      <h2 style="margin: 0"><span class="groupTitle"></span> <span class="hint" id="privateTag" hidden>(private)</span></h2>
-      <span class="actions">
-        <button type="button" class="link" id="share">Share link</button>
-        <button type="button" class="link" id="edit">Edit mine</button>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <h2><span class="groupTitle"></span> <span class="hint" id="privateTag" hidden>(private)</span></h2>
+      <span class="flex gap-2">
+        <button type="button" class="btn btn-outline btn-sm" id="share">Share link</button>
+        <button type="button" class="btn btn-sm" id="edit">Edit mine</button>
       </span>
     </div>
-    <div class="weekNav">
-      <button type="button" class="nav prevWeek" aria-label="Previous week">‹</button>
-      <div class="mid"><strong class="weekLabel"></strong><button type="button" class="link thisWeek">Back to this week</button></div>
-      <button type="button" class="nav nextWeek" aria-label="Next week">›</button>
+    <div class="weekNav flex items-center justify-between gap-2">
+      <button type="button" class="btn btn-outline prevWeek w-11 px-0 text-lg" aria-label="Previous week">‹</button>
+      <div class="flex flex-col items-center text-center">
+        <strong class="weekLabel text-sm font-medium"></strong>
+        <button type="button" class="thisWeek cursor-pointer text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground">Back to this week</button>
+      </div>
+      <button type="button" class="btn btn-outline nextWeek w-11 px-0 text-lg" aria-label="Next week">›</button>
     </div>
-    <div class="scroll"><table id="table"></table></div>
-    <div id="dayList"></div>
-    <div class="row">
-      <button type="button" class="link back">← All groups</button>
-      <span class="actions">
-        <button type="button" class="link danger" id="leave">Leave group</button>
-        <button type="button" class="link danger" id="delete" hidden>Delete group</button>
+    <!-- Seven columns don't fit a phone: the table swaps for the per-day list -->
+    <div class="hidden overflow-x-auto sm:block"><table id="table"></table></div>
+    <div id="dayList" class="sm:hidden"></div>
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <button type="button" class="btn btn-ghost btn-sm back -ml-3">← All groups</button>
+      <span class="flex gap-1">
+        <button type="button" class="btn btn-ghost btn-danger btn-sm" id="leave">Leave group</button>
+        <button type="button" class="btn btn-ghost btn-danger btn-sm" id="delete" hidden>Delete group</button>
       </span>
     </div>
   </section>
 
-  <p class="error" id="error" hidden></p>
+  <p class="text-sm text-destructive" id="error" hidden></p>
+
+  <!-- Hours for one day (opened by clicking a day in the form) -->
+  <dialog id="dayDialog" class="m-auto w-[calc(100%-2rem)] max-w-sm rounded-xl border bg-background p-0 text-foreground shadow-lg backdrop:bg-black/50">
+    <form method="dialog" id="dayForm" class="flex flex-col gap-4 p-6">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <h2 id="dayTitle"></h2>
+          <p class="hint mt-1">When are you free?</p>
+        </div>
+        <button type="button" id="dayClose" class="btn btn-ghost -mt-2 -mr-3 size-9 px-0" aria-label="Close">✕</button>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="flex flex-col gap-2">
+          <label class="label" for="dayFrom">From</label>
+          <input class="input" type="time" id="dayFrom" required>
+        </div>
+        <div class="flex flex-col gap-2">
+          <label class="label" for="dayTo">To</label>
+          <input class="input" type="time" id="dayTo" required>
+        </div>
+      </div>
+      <div class="flex gap-2">
+        <button type="button" class="btn btn-outline flex-1" id="dayClear">Not available</button>
+        <button type="submit" class="btn flex-1" autofocus>Set hours</button>
+      </div>
+    </form>
+  </dialog>
 </main>
 
 <script>
@@ -237,26 +263,30 @@ const groupUrl = g => location.origin + location.pathname + '?g=' + encodeURICom
 const enter = () => linkGroup ? openGroup(linkGroup, '', true) : showGroups();
 if (linkGroup) { $('inviteGroup').textContent = linkGroup; $('invite').hidden = false; }
 
-// Build one row per day: checkbox, and time range shown only when checked.
+// One button per day; its hours live in data-from/data-to (empty = not available) and are edited in the dialog.
 $('days').innerHTML = DAYS.map(d => `
-  <div class="day" data-day="${d}">
-    <label class="check"><input type="checkbox"> <span>${d} <span class="date"></span></span></label>
-    <span class="na">Not available</span>
-    <span class="times" hidden>
-      <input type="time" class="from" value="18:00" aria-label="${d} from">
-      <span>to</span>
-      <input type="time" class="to" value="22:00" aria-label="${d} to">
-    </span>
-  </div>`).join('');
+  <button type="button" class="day" data-day="${d}">
+    <span class="font-medium">${d} <span class="date font-normal text-muted-foreground"></span></span>
+    <span class="status"></span>
+  </button>`).join('');
 
-function syncRow(row) {
-  const on = row.querySelector('input[type=checkbox]').checked;
-  row.querySelector('.times').hidden = !on;
-  row.querySelector('.na').hidden = on;
-}
-$('days').addEventListener('change', e => {
-  if (e.target.type === 'checkbox') syncRow(e.target.closest('.day'));
+// dayRow = the day button whose hours the dialog is editing.
+let dayRow = null;
+$('days').addEventListener('click', e => {
+  dayRow = e.target.closest('.day');
+  if (!dayRow) return;
+  $('dayTitle').textContent = `${dayRow.dataset.day}, ${dayRow.querySelector('.date').textContent}`;
+  $('dayFrom').value = dayRow.dataset.from || '18:00';
+  $('dayTo').value = dayRow.dataset.to || '22:00';
+  $('dayDialog').showModal();
 });
+// method="dialog" closes it on submit; nothing is sent to the server until the week is saved.
+$('dayForm').addEventListener('submit', () => setRow(dayRow, { from: $('dayFrom').value, to: $('dayTo').value }));
+$('dayClear').addEventListener('click', () => { setRow(dayRow, null); $('dayDialog').close(); });
+$('dayClose').addEventListener('click', () => $('dayDialog').close());
+// The dialog has no padding of its own, so a click landing on it is a click on the backdrop.
+$('dayDialog').addEventListener('click', e => { if (e.target === $('dayDialog')) $('dayDialog').close(); });
+
 $('private').addEventListener('change', () => { $('newCode').hidden = !$('private').checked; });
 
 // Every call is a POST acting as the current name (+ session token if it has a password).
@@ -311,7 +341,7 @@ async function showGroups() {
   list.textContent = '';
   if (!groupNames.length) {
     const p = document.createElement('p');
-    p.className = 'empty';
+    p.className = 'hint';
     p.textContent = 'No groups yet — create the first one below.';
     list.appendChild(p);
   }
@@ -320,7 +350,7 @@ async function showGroups() {
     const joined = members.some(m => same(m, me));
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'group' + (joined ? ' joined' : '');
+    btn.className = 'btn btn-outline group-item' + (joined ? ' joined' : '');
     btn.appendChild(document.createElement('span')).textContent = g;
     btn.appendChild(document.createElement('small')).textContent = (isPrivate ? 'Private · ' : '') +
       members.length + (members.length === 1 ? ' person' : ' people') + (joined ? ' · joined' : '');
@@ -392,19 +422,19 @@ const shortDate = d => d.toLocaleDateString(undefined, { month: 'short', day: 'n
 // weekStart = Monday of the week on screen; current = the open group's data as last returned by the server.
 let weekStart = mondayOf(new Date()), current = { members: {} };
 
-// Sets one form row from a saved {from,to} (or clears it).
-function setRow(row, d) {
-  row.querySelector('input[type=checkbox]').checked = !!d;
-  row.querySelector('.from').value = d ? d.from : '18:00';
-  row.querySelector('.to').value = d ? d.to : '22:00';
-  syncRow(row);
-}
-
 function fmt(t) {
   let [h, m] = t.split(':').map(Number);
   const ap = h < 12 ? 'am' : 'pm';
   h = h % 12 || 12;
   return h + (m ? ':' + String(m).padStart(2, '0') : '') + ap;
+}
+
+// Sets one day button from a {from,to} (or clears it).
+function setRow(row, d) {
+  row.dataset.from = d ? d.from : '';
+  row.dataset.to = d ? d.to : '';
+  row.classList.toggle('on', !!d);
+  row.querySelector('.status').textContent = d ? `${fmt(d.from)}–${fmt(d.to)}` : 'Not available';
 }
 
 // Redraws everything that depends on the week on screen: labels, my form rows, the table and the phone list.
@@ -425,6 +455,7 @@ function renderWeek() {
     setRow(row, mine && mine[keys[i]]);
   });
   $('copyPrev').hidden = !mine || !keys.some((_, i) => mine[iso(addDays(weekStart, i - 7))]);
+  $('formBack').textContent = mine ? '← Back' : '← All groups';
 
   const table = $('table');
   table.textContent = '';
@@ -541,12 +572,9 @@ $('form').addEventListener('submit', guard(async e => {
   e.preventDefault();
   $('error').hidden = true;
   const days = {};
+  // Keyed by date; null clears that date. Only the week on screen is sent, other weeks stay as saved.
   for (const row of document.querySelectorAll('.day')) {
-    // Keyed by date; null clears that date. Only the week on screen is sent, other weeks stay as saved.
-    if (!row.querySelector('input[type=checkbox]').checked) { days[row.dataset.date] = null; continue; }
-    const from = row.querySelector('.from').value, to = row.querySelector('.to').value;
-    if (!from || !to) throw new Error(`Pick a start and end time for ${row.dataset.day}.`);
-    days[row.dataset.date] = { from, to };
+    days[row.dataset.date] = row.dataset.from ? { from: row.dataset.from, to: row.dataset.to } : null;
   }
   const makePrivate = isNew && $('private').checked;
   const passcode = makePrivate ? $('newCode').value.trim() : code;
@@ -562,6 +590,12 @@ $('form').addEventListener('submit', guard(async e => {
 }));
 
 $('edit').addEventListener('click', () => { renderWeek(); show('form'); });
+// Editing an existing entry: back to the calendar, dropping unsaved changes. Joining: back to the group list.
+$('formBack').addEventListener('click', guard(async () => {
+  if (!current.members[me]) return showGroups();
+  renderWeek();
+  show('results');
+}));
 
 // Week switcher (one in the form, one above the calendar).
 const goWeek = start => { weekStart = start; $('error').hidden = true; renderWeek(); };
