@@ -2,7 +2,8 @@
 //   login        { password? }                 -> { name, hasPassword, token? }
 //   setPassword  { password }                  -> { name, hasPassword: true, token }   (only if the name has none yet)
 //   list         {}                            -> groups you can see: { group: { members: [..], private, creator } }
-//   open         { group, code? }              -> { exists, group, private, creator, members: { name: days } }
+//   open         { group, code? }              -> { exists, group, private, creator, key, members: { name: days } }
+//                                                 (key = share-link key for private groups; works as code)
 //   save         { group, days, private?, code? } -> merges days ({ "YYYY-MM-DD": {from,to} | null }) into your
 //                                                 record (creating the group if new), returns the group
 //   leave        { group }                     -> removes you from the group (an emptied group is deleted)
@@ -64,7 +65,8 @@ class HttpError extends Error {
 function checkAccess(info, isMember, code) {
   if (!info.private || isMember) return;
   if (!code) throw new HttpError(403, 'This group is private. Enter its passcode to join.', { needCode: true });
-  if (hash(code) !== info.code) throw new HttpError(403, 'Wrong passcode.', { needCode: true });
+  // A share link carries the stored hash itself as its key (only handed to people already in).
+  if (hash(code) !== info.code && code !== info.code) throw new HttpError(403, 'Wrong passcode.', { needCode: true });
 }
 
 async function newSession(lower) {
@@ -133,7 +135,7 @@ async function handle(req) {
     if (!info) return { exists: false, group, members: {} };
     const members = parseHash((await redis(['HGETALL', key(group)]))[0]);
     checkAccess(info, Object.keys(members).some(m => same(m, name)), input.code);
-    return { exists: true, group, private: info.private, creator: info.creator, members };
+    return { exists: true, group, private: info.private, creator: info.creator, key: info.code, members };
   }
 
   const existing = parseHash((await redis(['HGETALL', key(group)]))[0]);
@@ -182,7 +184,7 @@ async function handle(req) {
   }
   await redis(...commands);
   const members = parseHash((await redis(['HGETALL', key(group)]))[0]);
-  return { exists: true, group, private: created.private, creator: created.creator, members };
+  return { exists: true, group, private: created.private, creator: created.creator, key: created.code, members };
 }
 
 module.exports = async (req, res) => {
