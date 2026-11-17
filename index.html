@@ -79,7 +79,11 @@
     #table td.no { @apply text-muted-foreground; }
     #table tr.me td:first-child::after { content: " (you)"; @apply font-normal text-muted-foreground; }
     #table tfoot td { @apply border-b-0 font-medium; }
-    #table th.today, .dayHead.today strong { @apply text-ok; }
+    #table th.today, .dayHead.today button { @apply text-ok; }
+    /* Dates (and my own cells) open the hours dialog */
+    #results [data-date] { @apply cursor-pointer; }
+    #results button[data-date] { @apply font-semibold underline-offset-4 hover:underline; }
+    #table tr.me td.no[data-date]:hover { @apply bg-accent; }
 
     /* Per-day list (phones) */
     .dayCard { @apply border-t py-3 first:border-t-0 first:pt-0; }
@@ -260,7 +264,9 @@ let token = '', hasPassword = false, pendingGroup = '';
 let linkGroup = (new URLSearchParams(location.search).get('g') || '').trim();
 const groupUrl = g => location.origin + location.pathname + '?g=' + encodeURIComponent(g);
 // Where to go after signing in: the linked group if there is one, otherwise the group list.
-const enter = () => linkGroup ? openGroup(linkGroup, '', true) : showGroups();
+// A private group's link also carries its key (#k=...), which gets the recipient in without the passcode.
+const linkKey = new URLSearchParams(location.hash.slice(1)).get('k') || '';
+const enter = () => linkGroup ? openGroup(linkGroup, linkKey, true) : showGroups();
 if (linkGroup) { $('inviteGroup').textContent = linkGroup; $('invite').hidden = false; }
 
 // One button per day; its hours live in data-from/data-to (empty = not available) and are edited in the dialog.
@@ -270,19 +276,32 @@ $('days').innerHTML = DAYS.map(d => `
     <span class="status"></span>
   </button>`).join('');
 
-// dayRow = the day button whose hours the dialog is editing.
-let dayRow = null;
-$('days').addEventListener('click', e => {
-  dayRow = e.target.closest('.day');
-  if (!dayRow) return;
-  $('dayTitle').textContent = `${dayRow.dataset.day}, ${dayRow.querySelector('.date').textContent}`;
-  $('dayFrom').value = dayRow.dataset.from || '18:00';
-  $('dayTo').value = dayRow.dataset.to || '22:00';
+// Opens the hours dialog for one day; onSet gets {from,to}, or null for "Not available".
+let onSet = () => {};
+function openDay(title, d, then) {
+  onSet = then;
+  $('dayTitle').textContent = title;
+  $('dayFrom').value = d ? d.from : '18:00';
+  $('dayTo').value = d ? d.to : '22:00';
   $('dayDialog').showModal();
+}
+// In the form the dialog only fills in the row; nothing is sent to the server until the week is saved.
+$('days').addEventListener('click', e => {
+  const row = e.target.closest('.day');
+  if (!row) return;
+  openDay(`${row.dataset.day}, ${row.querySelector('.date').textContent}`,
+    row.dataset.from && { from: row.dataset.from, to: row.dataset.to }, d => setRow(row, d));
 });
-// method="dialog" closes it on submit; nothing is sent to the server until the week is saved.
-$('dayForm').addEventListener('submit', () => setRow(dayRow, { from: $('dayFrom').value, to: $('dayTo').value }));
-$('dayClear').addEventListener('click', () => { setRow(dayRow, null); $('dayDialog').close(); });
+// On the calendar, clicking a date (or one of my own cells) sets my hours for that date and saves right away.
+$('results').addEventListener('click', e => {
+  const key = (e.target.closest('[data-date]') || {dataset: {}}).dataset.date;
+  if (!key) return;
+  const title = new Date(key + 'T00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  openDay(title, current.members[me][key], guard(async d => showResults(await api('save', { group, days: { [key]: d }, code }))));
+});
+// method="dialog" closes it on submit.
+$('dayForm').addEventListener('submit', () => onSet({ from: $('dayFrom').value, to: $('dayTo').value }));
+$('dayClear').addEventListener('click', () => { $('dayDialog').close(); onSet(null); });
 $('dayClose').addEventListener('click', () => $('dayDialog').close());
 // The dialog has no padding of its own, so a click landing on it is a click on the backdrop.
 $('dayDialog').addEventListener('click', e => { if (e.target === $('dayDialog')) $('dayDialog').close(); });
@@ -463,7 +482,10 @@ function renderWeek() {
   head.appendChild(document.createElement('th'));
   dates.forEach((date, i) => {
     const th = head.appendChild(document.createElement('th'));
-    th.textContent = `${DAYS[i].slice(0, 3)} ${date.getDate()}`;
+    const btn = th.appendChild(document.createElement('button'));
+    btn.type = 'button';
+    btn.dataset.date = keys[i];
+    btn.textContent = `${DAYS[i].slice(0, 3)} ${date.getDate()}`;
     if (keys[i] === today) th.className = 'today';
   });
   const body = table.createTBody();
@@ -474,6 +496,7 @@ function renderWeek() {
     for (const d of keys) {
       const v = all[n][d], td = tr.insertCell();
       td.className = v ? 'yes' : 'no';
+      if (n === me) td.dataset.date = d;
       td.textContent = v ? `${fmt(v.from)}–${fmt(v.to)}` : '—';
     }
   }
@@ -492,7 +515,10 @@ function renderWeek() {
     card.className = 'dayCard';
     const dayHead = card.appendChild(document.createElement('div'));
     dayHead.className = 'dayHead' + (d === today ? ' today' : '');
-    dayHead.appendChild(document.createElement('strong')).textContent = `${DAYS[i]}, ${shortDate(dates[i])}`;
+    const btn = dayHead.appendChild(document.createElement('button'));
+    btn.type = 'button';
+    btn.dataset.date = d;
+    btn.textContent = `${DAYS[i]}, ${shortDate(dates[i])}`;
     dayHead.appendChild(document.createElement('span')).textContent = `${free.length}/${names.length} available`;
     for (const n of free) {
       const row = card.appendChild(document.createElement('div'));
@@ -514,7 +540,6 @@ function showResults(data) {
   current = data;
   renderWeek();
   history.replaceState(null, '', groupUrl(group));
-  $('share').dataset.private = data.private ? '1' : '';
   $('privateTag').hidden = !data.private;
   $('delete').hidden = !same(data.creator, me);   // only the creator can delete the group
   show('results');
@@ -610,9 +635,9 @@ $('copyPrev').addEventListener('click', () => {
 });
 
 // Share: the phone's share sheet where there is one, otherwise copy to the clipboard.
-// The link never contains a private group's passcode; that has to be passed on separately.
+// A private group's link includes its key, so whoever gets the link can join without the passcode.
 $('share').addEventListener('click', guard(async () => {
-  const btn = $('share'), url = groupUrl(group);
+  const btn = $('share'), url = groupUrl(group) + (current.key ? '#k=' + current.key : '');
   const flash = text => { btn.textContent = text; setTimeout(() => { btn.textContent = 'Share link'; }, 2500); };
   if (navigator.share) {
     try { await navigator.share({ title: group + ' availability', url }); } catch { /* share sheet dismissed */ }
@@ -620,7 +645,7 @@ $('share').addEventListener('click', guard(async () => {
   }
   try {
     await navigator.clipboard.writeText(url);
-    flash(btn.dataset.private ? 'Copied — share the passcode too' : 'Link copied');
+    flash('Link copied');
   } catch {
     throw new Error('Could not copy automatically. Copy the link from the address bar instead.');
   }
